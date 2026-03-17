@@ -1,6 +1,6 @@
 ## Android serial communication tool
 It was migrated from Google's official serial communication library and expanded on this basis. Provides a packaged API for serial communication in one minute. Stop bits, data bits, parity, and flow control can be set.
-- [中文](https://github.com/Acccord/AndroidSerialPort/blob/master/README.md)
+- [中文](./README-v1.md)
 
 
 ## MENU

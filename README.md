@@ -1,8 +1,20 @@
-## 安卓串口通信工具
-由 Google 官方串口通信库迁移而来，并在此基础上做了扩展。提供封装后的API，可在一分钟搞定串口通信。可设置停止位、数据位、奇偶校验、流控。也不用考虑分包拆包，拿来即用。
-> 作者这边已在一万台设备以上稳定运行数年，可放心使用。
-- [English](https://github.com/Acccord/AndroidSerialPort/blob/master/README-en.md)
+## Android 串口通信库
 
+Android 串口通信库，面向长期稳定运行的工程场景（工控、售货机、智能柜等）。
+
+本库以**“快速使用 / 自定义使用”**为主线：  
+**快速使用**用于极速完成串口收发；**自定义使用**覆盖协议、重连、监控与高端场景。
+
+---
+
+## 旧版文档（1.x.x）
+
+如果你当前使用的是 **1.x.x** 版本，请查看之前的 README 文档：
+
+- [1.x.x 中文 README](doc/README-v1.md)
+- [1.x.x English README](doc/README-v1-en.md)
+
+---
 
 ## 目录
  - [配置](#配置)
@@ -11,22 +23,18 @@
     - 第1步：打开串口
     - 第2步：往串口发数据
     - 第3步：串口返回的数据接收
- - [打开多个串口](#打开多个串口)
-    - 第1步：打开串口
-    - 第2步：往串口发数据
-    - 第3步：串口返回的数据接收
+    - 第4步：异常监听
  - [自定义使用](#自定义使用)
-    - 第1步：创建实类
-    - 第2步：参数配置
-    - 第3步：打开串口
-    - 第4步：向串口发送数据
-    - 详细API
- - [GOOGLE串口通信API](#GOOGLE串口通信API)
-    - 设置su路径
-    - 查看设备串口列表
+    - 2.1 入口选择
+    - 2.1.1 回调线程提示
+    - 2.2 `SerialConnection` + 协议帧（CRLF）
+    - 2.3 `SerialManager` 管理多串口
+    - 2.4 高端场景（NIO + 监控 + 重连）
+    - 2.5 自定义帧解码
+    - 2.6 配置说明（`SerialConfig`）
  - [更新记录](#更新记录)
- - [常见问题](#常见问题)
 
+---
 
 ## 配置
 在项目的build.gradle添加
@@ -40,268 +48,240 @@ allprojects {
 在模块的build.gradle添加
 ```
 dependencies {
-    implementation 'com.github.Acccord:AndroidSerialPort:1.5.2'
+    implementation 'com.github.Acccord:AndroidSerialPort:2.0.4'
 }
 ```
 
 
 ## 混淆
+
+通常无需额外手动配置，以下规则仅供需要手动配置或排查混淆问题时参考。
+
 ```
--keepclasseswithmembernames class * {
-    native <methods>;
-}
--keep class android.serialport.* {*;}
+-keep class com.temon.serial.** { *; }
+-keepclassmembers class * { native <methods>; }
+
+# Preserve useful debugging information.
+-keepattributes SourceFile,LineNumberTable,Signature,InnerClasses,EnclosingMethod
+
 
 ```
 
 ## 快速使用
-针对没有特殊串口通信设置需求，使用默认串口配置
+
+针对没有特殊串口通信设置需求，使用默认串口配置。
+
+【EasySerial】默认能力包括：
+- 8N1（8 数据位、无校验、1 停止位）
+- 默认主线程回调（EasySerial）
+- 默认帧解码：Idle-Gap（处理半包/粘包，默认空闲间隔 50ms、最大帧长 2048）
+- 默认自动重连（指数退避策略，仅运行期进入 ERROR 才触发；手动 close 不重连；权限错误不重连）
+- 默认发送间隔：300ms（sendIntervalMs(DEFAULT_SEND_INTERVAL_MS)）
+- 默认支持多串口
+提示：同一端口被其他进程占用时会打开失败，需先释放占用或更换端口。
+
+使用提示（建议顺序）：
+- 先注册 `onDataReceived` / `onError`，再 `open`，避免首包或首个异常被错过
 
 ### 第1步：打开串口
-``` java
-/**
- * 打开串口
- * @param portStr   串口号
- * @param ibaudRate 波特率
- *
- * @return 0：打开串口成功
- *        -1：无法打开串口：没有串口读/写权限！
- *        -2：无法打开串口：未知错误！
- *        -3：无法打开串口：参数错误！
- */
-NormalSerial.instance().open(String portStr, int ibaudRate);
 
-//例
-int openStatus = NormalSerial.instance().open("/dev/ttyS1", 9600);
+```java
+EasySerial.open("/dev/ttyS1", 9600);
+EasySerial.open("/dev/ttyS2", 9600);  // 可同时打开多个串口
 ```
+
+返回值说明（打开阶段的即时结果）：
+- `OPEN_OK (0)`：打开成功
+- `OPEN_NO_PERMISSION (-1)`：无权限访问设备节点
+- `OPEN_UNKNOWN_ERROR (-2)`：未知错误（设备异常/系统返回异常等）
+- `OPEN_INVALID_PARAM (-3)`：参数非法（端口为空、波特率 <= 0）
 
 ### 第2步：往串口发数据
-``` java
-/**
- * 注意发送的数据类型为hex，字符串需要转成hex在发送
- * 转换方法：SerialDataUtils.stringToHexString(String s)
- * @param hexData 发送的数据
- */
-NormalSerial.instance().sendHex(String hexData)
 
-//例
-NormalSerial.instance().sendHex("AA033C0000E9")
+```java
+EasySerial.send("/dev/ttyS1", HexCodec.decode("AA033C0000E9"));
 ```
+提示：只有在对应端口 `open` 成功后再发送；`port` 必须与 `open` 时一致。
 
 ### 第3步：串口返回的数据接收
-``` java
-/**
- * OnNormalDataListener 为串口的接收数据回调，建议在当前类去实现这个接口
- * 不用时记得释放NormalSerial.instance().removeDataListener(this);
- */
-NormalSerial.instance().addDataListener(new OnNormalDataListener() {
+
+```java
+EasySerial.onDataReceived(new EasySerial.OnDataReceivedListener() {
     @Override
-    public void normalDataBack(String hexData) {
-        //注意，默认接收的类型为hex
-        //需要转换为字符串可调用SerialDataUtils.hexStringToString(hexData)
+    public void onDataReceived(String port, byte[] data, int length) {
+        String hex = HexCodec.encode(data, 0, length);
+        System.out.println("[" + port + "] RX: " + hex);
     }
 });
 ```
-总结：快速使用只需要的open成功后，就可以调用sendHex往串口发送数据，同时addDataListener来监听串口数据返回。如需使用其他功能使用，可参考下面的**自定义使用**。
 
-## 打开多个串口
-同时打开多个串口，可以针对每一个串口进行数据收发
+### 第4步：异常监听
 
-### 第1步：打开串口
-``` java
-/**
- * 打开串口，该方法可以多次调用，用来打开多个串口
- * @param portStr   串口号
- * @param ibaudRate 波特率
- *
- * @return 0：打开串口成功
- *        -1：无法打开串口：没有串口读/写权限！
- *        -2：无法打开串口：未知错误！
- *        -3：无法打开串口：参数错误！
- */
-COMSerial.instance().addCOM(String portStr, int ibaudRate);
-//也可以使用该方法添加串口，自定义串口参数
-COMSerial.instance().addCOM(String portStr, int ibaudRate, int mStopBits, int mDataBits, int mParity, int mFlowCon);
-
-//例
-COMSerial.instance().addCOM("/dev/ttyS1", 9600);
-COMSerial.instance().addCOM("/dev/ttyS2", 115200);
-COMSerial.instance().addCOM("/dev/ttyS3", 9600, 1, 8, 0, 0);
-```
-
-### 第2步：往串口发数据
-``` java
-/**
- * 注意发送的数据类型为hex，字符串需要转成hex在发送
- * 转换方法：SerialDataUtils.stringToHexString(String s)
- * @param portStr 串口号（即需要往哪个串口发送数据）
- * @param hexData 发送的数据
- */
-COMSerial.instance().sendHex(String portStr, String hexData)
-
-//例
-NormalSerial.instance().sendHex("/dev/ttyS1", "AA033C0000E9")
-```
-
-### 第3步：串口返回的数据接收
-``` java
-/**
- * OnComDataListener 为串口的接收数据回调，建议在当前类去实现这个接口
- * 不用时记得释放 COMSerial.instance().removeDataListener(this);
- *
- * 打开的所有串口有数据接收就会触发该回调，回调中会区分数据来自哪个串口，默认接收的类型为hex。
- */
-COMSerial.instance().addDataListener(new OnComDataListener() {
+```java
+EasySerial.onError(new EasySerial.OnErrorListener() {
     @Override
-    public void comDataBack(String com, String hexData) {
-        //com 为串口号
-        //hexData 为接收到的数据
+    public void onError(String port, SerialError error, String message, Throwable throwable) {
+        System.err.println("[" + port + "] Error: " + message);
+        if (throwable != null) throwable.printStackTrace();
     }
 });
 ```
-总结：多个串口使用只需要多次调用addCOM方法，就可以同时打开多个串口。调用sendHex往不同的串口发送数据，同时addDataListener来监听串口数据返回。如需使用其他功能使用，可参考下面的**自定义使用**。
 
-## 自定义使用
+说明：运行过程中的断线、读写异常等属于异步错误，需要通过 `onError` 监听获取。
+常见处理：权限不足请确认设备节点权限；设备路径不存在或被占用会导致 `OPEN_FAILED`/`CLOSED`。
+建议：应用退出或不再使用时调用 `close` / `closeAll`，避免资源泄漏。
 
-### 第1步：创建实类
-``` java
-/**
- * 打开串口
- * @param portStr   串口号
- * @param ibaudRate 波特率
- */
-BaseSerial mBaseSerial = new BaseSerial() {
-                           @Override
-                           public void onDataBack(String data) {
-                               //这里是串口的数据返回，默认返回类型为16进制字符串
-                           }
-                       };
+`SerialError` 枚举说明：
+- `INVALID_PARAMETER`：参数错误
+- `PERMISSION_DENIED`：权限不足
+- `OPEN_FAILED`：打开串口失败
+- `IO_ERROR`：读写异常
+- `CLOSED`：串口已关闭或未打开
+
+常见问题（简要排查）：
+- `PERMISSION_DENIED`：确认设备节点权限或授予设备访问权限
+- `OPEN_FAILED`：检查设备路径是否存在、是否被其他进程占用
+- `CLOSED`：先 `open` 再 `send`，并确保端口名一致
+
+**总结：** 快速使用只需要 `open` 成功后，就可以调用 `send` 往串口发送数据，同时 `onDataReceived` 来监听串口数据返回。如需使用其他功能，可参考下面的**自定义使用**。
+
+---
+
+<a id="自定义使用"></a>
+## 自定义使用（协议 / 多串口精细管理 / 高端场景）
+
+### 2.1 入口选择
+
+- `SerialConnection`：单连接、可控性高
+- `SerialManager`：多串口精细管理
+
+### 2.1.1 回调线程提示
+
+- `SerialConnection` / `SerialManager` 默认回调线程为 IO 线程（`Dispatchers.direct()`），请避免在回调里执行耗时操作。
+- `EasySerial` 默认回调在主线程（见“快速使用”）。
+- 如需切换到主线程或自定义线程池，请使用 `callbackDispatcher(...)` 配置。
+
+### 2.2 `SerialConnection` + 协议帧（CRLF）
+
+```java
+SerialConfig config = new SerialConfig.Builder()
+    .port("/dev/ttyS1")
+    .baudRate(9600)
+    .build();
+
+SerialConnection conn = SerialConnection.builder(config)
+    .frameDecoder(SerialFraming.crlf())
+    .callbackDispatcher(Dispatchers.mainThread())
+    .listener(new SerialListenerAdapter() {
+        @Override
+        public void onFrame(byte[] frame, int length) {
+            String hex = HexCodec.encode(frame, 0, length);
+            System.out.println("Frame: " + hex);
+        }
+    })
+    .build();
+
+conn.open();
 ```
+提示：`SerialConnection` 默认不自动重连，只有配置 `reconnectPolicy(...)` 才会启用。
+提示：重连仅在运行期进入 `ERROR` 状态触发，不会覆盖手动 `close` 的行为。
 
-### 第2步：参数配置
-``` java
-/**
- * 设置串口
- * @param portStr 串口号
- */
-mBaseSerial.setsPort(String sPort);
+### 2.3 `SerialManager` 管理多串口
 
-/**
- * 设置波特率
- * @param iBaudRate 波特率
- */
-mBaseSerial.setiBaudRate( int iBaudRate);
+```java
+SerialManager manager = new SerialManager();
+manager.setCallbackDispatcher(Dispatchers.mainThread());
 
-/**
- * 停止位 【1 或 2】
- * @param mStopBits 停止位（默认 1）
- */
-mBaseSerial.setmStopBits( int mStopBits);
-
-/**
- * 数据位【5 ~ 8】
- * @param mDataBits 数据位（默认 8）
- */
-mBaseSerial.setmDataBits( int mDataBits);
-
-/**
- * 奇偶校验【0 None； 1 Odd； 2 Even】
- * @param mParity 奇偶校验（默认 0）
- */
-mBaseSerial.setmParity( int mParity);
-
-/**
- * 流控 【不使用流控(NONE), 硬件流控(RTS/CTS), 软件流控(XON/XOFF)】
- * @param mFlowCon 默认不使用流控
- */
-mBaseSerial.setmFlowCon(int mFlowCon);
+try {
+    manager.open("/dev/ttyS1", 9600);
+    manager.addDataListener("/dev/ttyS1", new SerialManager.OnHexDataListener() {
+        @Override
+        public void onData(String hex) {
+            System.out.println("Received: " + hex);
+        }
+    });
+    manager.sendHex("/dev/ttyS1", "AA033C0000E9");
+} catch (SerialException e) {
+    e.printStackTrace();
+}
 ```
+提示：`sendHex/sendBytes` 在端口未打开时会抛出 `CLOSED`；多端口场景请使用 `port` 区分回调来源。
+提示：同一端口重复 `open` 会关闭旧连接并创建新连接，请避免并发重复打开。
+提示：`SerialManager` 默认是 raw 模式（未设置解码器），不会按帧回调；如需分帧请用 `config().frameDecoder(...)` 或 `config().idleGap(...)` 等配置。
 
-### 第3步：打开串口
-``` java
-/**
- * 打开串口
- *
- * @return 0：打开串口成功
- *        -1：无法打开串口：没有串口读/写权限！
- *        -2：无法打开串口：未知错误！
- *        -3：无法打开串口：参数错误！
- */
-mBaseSerial.openSerial();
+### 2.4 高端场景（NIO + 监控 + 重连）
+
+```java
+SerialConfig config = new SerialConfig.Builder()
+    .port("/dev/ttyS1")
+    .baudRate(500000)
+    .readTimeoutMs(50)
+    .deviceCheckIntervalMs(1000)
+    .useNioMode(true)
+    .readBufferSize(8192)
+    .build();
+
+SerialConnection connection = SerialConnection.builder(config)
+    .frameDecoder(SerialFraming.crlf())
+    .logger(new AndroidSerialLogger(true))
+    .reconnectPolicy(new ReconnectPolicy.ExponentialBackoff(10, 100, 2.0, 5000))
+    .build();
+
+connection.open();
+SerialStatistics stats = connection.getStatistics();
+System.out.println("Throughput: " + stats.getReceiveThroughputBps() + " B/s");
+System.out.println("Error rate: " + stats.getErrorRate() + " errors/s");
 ```
+提示：`readTimeoutMs` 越小 CPU 轮询越频繁；`deviceCheckIntervalMs` 越小越敏感但更耗电；`readBufferSize` 过小易增大分帧/拷贝开销。
 
-### 第4步：向串口发送数据
-``` java
-//发送HEX字符串
-mBaseSerial.sendHex(String sHex);
+### 2.5 自定义帧解码
 
-//发送字符串
-mBaseSerial.sendTxt(String sTxt);
-
-//发送字节数组
-mBaseSerial.sendByteArray(byte[] bOutArray);
+```java
+FrameDecoder fixed = SerialFraming.fixedLength(64);
+FrameDecoder length = SerialFraming.lengthFieldBuilder()
+    .lengthFieldOffset(0)
+    .lengthFieldLength(2)
+    .lengthAdjustment(0)
+    .initialBytesToStrip(2)
+    .build();
+FrameDecoder idle = SerialFraming.idleGap(100, 1024);
 ```
+说明：`lengthFieldBuilder()` 默认大端、`maxFrameLength=4096`；`initialBytesToStrip` 表示丢弃前 N 个字节。
+提示：长度字段是否包含头部/校验，需与协议定义一致，否则会导致错帧或丢弃。
 
-### 详细API
-方法名|返回参数|介绍
---|:--:|--:
-close()|void|关闭串口
-getBaudRate()|int|获取连接串口的波特率
-getDataBits()|int|获取数据位
-getFlowCon()|int|获取流控
-getParity()|int|获取奇偶校验方式
-getPort()|String|获取连接串口的串口号
-getStopBits()|int|获取停止位
-isOpen()|boolean|串口是否打开
-onDataBack(String data)|void|串口数据接收回调，该方法在主线程
-openSerial()|int|打开串口；0=打开串口成功; -1=无法打开串口：没有串口读/写权限; -2=无法打开串口：未知错误; -3=无法打开串口：参数错误！
-sendHex(String sHex)|void|向串口发送HEX字符串
-sendTxt(String sTxt)|void|向串口发送字符串
-sendByteArray(byte[] bOutArray)|void|向串口发送字节数组
-setBaudRate(int iBaudRate)|void|设置波特率
-setDelay(int delay)|void|串口数据的发送间隔，默认300ms
-setGap(int gap)|void|串口数据的读取间隔，默认30ms
-setDataBits(int mDataBits)|void|设置数据位
-setFlowCon(int mFlowCon)|void|设置流控
-setParity(int mParity)|void|设置奇偶校验方式
-setPort(String sPort)|void|设置串口号
-setStopBits(int mStopBits)|void|设置停止位
-setSerialDataListener(OnSerialDataListener dataListener)|void|监听串口数据的发送和接收，该方法可用于log打印；注意该方法回调不是在主线程
+**丢弃计数说明：**  
+当帧解码器检测到异常数据流（超长/非法长度）会丢弃缓冲区。可通过解码器实例读取丢弃次数与字节数：
 
-
-## GOOGLE串口通信API
-
-### 设置su路径
-``` java
-//需要在打开串口前调用
-SerialPort.setSuPath("/system/xbin/su");
+```java
+FrameDecoder decoder = SerialFraming.crlf();
+if (decoder instanceof DelimiterFrameDecoder) {
+    long dropped = ((DelimiterFrameDecoder) decoder).getDroppedCount();
+    long droppedBytes = ((DelimiterFrameDecoder) decoder).getDroppedBytes();
+}
 ```
+提示：丢弃计数持续增长通常意味着帧边界或长度配置不匹配，请检查协议定义与解码器参数。
 
-### 查看设备串口列表
-``` java
-SerialPortFinder serialPortFinder = new SerialPortFinder();
-String[] allDevices = serialPortFinder.getAllDevices();
-String[] allDevicesPath = serialPortFinder.getAllDevicesPath();
+### 2.6 配置说明（`SerialConfig`）
 
-```
+| 配置项 | 类型 | 默认值 | 说明 |
+|--------|------|--------|------|
+| `port` | String | - | 串口路径（必需） |
+| `baudRate` | int | - | 波特率（必需） |
+| `stopBits` | int | 1 | 停止位（1或2） |
+| `dataBits` | int | 8 | 数据位（5-8） |
+| `parity` | int | 0 | 奇偶校验（0=None, 1=Odd, 2=Even） |
+| `flowCon` | int | 0 | 流控（0=None, 1=Hard, 2=Soft） |
+| `readTimeoutMs` | int | 1000 | 读超时（0=阻塞，>0=超时毫秒） |
+| `sendIntervalMs` | int | 0 | 发送间隔（毫秒） |
+| `deviceCheckIntervalMs` | int | 5000 | 设备在线检查间隔（毫秒，0=禁用） |
+| `useNioMode` | boolean | false | 启用 NIO Selector（毫秒级超时精度） |
+| `readBufferSize` | int | 1024 | 读缓冲区（字节，0=默认=1024） |
+| `permissionStrategy` | PermissionStrategy | - | 设备权限策略（空表示不做自动权限处理） |
+
+---
 
 ## 更新记录
-- 1.5.2 【2024-12-18】
-    - 解决1.5.0无法依赖的问题
-- 1.5.0 【2019-11-26】
-    - 发布1.5.0版本
-- 1.3.0 【2019-09-19】
-    - 增加停止位、数据位、奇偶校验、流控设置
-- 1.1.0 【2019-08-13】
-    - minSdkVersion改为14
-    - 打开串口回调方法优化
-- 1.0.0 【2019-07-18】
-    - 发布1.0.0版本
- 
-## 常见问题
-#### 取不到数据？
-   请检查一下设置的串口、波特率是否正常，还有板子的数据线是否松动。
-#### 取到的数据乱码
-   1. 调试过程中，请确保一个串口只连接一块板子。
-   2. 关闭其他读取串口的软件或者测试工具，确保同一时间段内，只有一个程序在接收串口数据。
 
+- 2026-02-07：native `libserial_port.so` 增加 16KB 页对齐链接参数，兼容 Android 15+ 16KB 设备要求。
+
+---
