@@ -57,7 +57,7 @@ allprojects {
 在模块的build.gradle添加
 ```
 dependencies {
-    implementation 'com.github.Acccord:AndroidSerialPort:2.0.4'
+    implementation 'com.github.Acccord:AndroidSerialPort:2.0.5'
 }
 ```
 
@@ -97,6 +97,12 @@ dependencies {
 ```java
 EasySerial.open("/dev/ttyS1", 9600);
 EasySerial.open("/dev/ttyS2", 9600);  // 可同时打开多个串口
+```
+
+需要按协议调整最小写间隔时，可在打开端口时显式传入；未传入时仍使用默认 `300ms`：
+
+```java
+EasySerial.open("/dev/ttyS1", 19200, 0);
 ```
 
 返回值说明（打开阶段的即时结果）：
@@ -291,6 +297,7 @@ if (decoder instanceof DelimiterFrameDecoder) {
 
 ## 更新记录
 
+- 2026-07-11：发布 2.0.5，`EasySerial.open` 新增可配置发送间隔重载；原两参数 API 与默认 300ms 行为保持不变。
 - 2026-02-07：native `libserial_port.so` 增加 16KB 页对齐链接参数，兼容 Android 15+ 16KB 设备要求。
 
 ---

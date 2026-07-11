@@ -62,7 +62,15 @@ public final class EasySerial {
 
     // ---- Static proxy (singleton shortcuts) ----
     public static int open(String port, int baudRate) {
-        return instance().openInternal(port, baudRate);
+        return instance().openInternal(port, baudRate, DEFAULT_SEND_INTERVAL_MS);
+    }
+
+    /**
+     * Opens a port with a caller-defined minimum interval between physical writes.
+     * Existing callers should continue using {@link #open(String, int)}.
+     */
+    public static int open(String port, int baudRate, int sendIntervalMs) {
+        return instance().openInternal(port, baudRate, sendIntervalMs);
     }
 
     public static void send(String port, byte[] data) throws SerialException {
@@ -137,7 +145,7 @@ public final class EasySerial {
     /**
      * Open a serial port once for the whole app.
      */
-    private int openInternal(String port, int baudRate) {
+    private int openInternal(String port, int baudRate, int sendIntervalMs) {
         if (port == null || port.trim().isEmpty()) {
             return OPEN_INVALID_PARAM;
         }
@@ -149,7 +157,7 @@ public final class EasySerial {
             SerialConfig config = new SerialConfig.Builder()
                     .port(port)
                     .baudRate(baudRate)
-                    .sendIntervalMs(DEFAULT_SEND_INTERVAL_MS)
+                    .sendIntervalMs(sendIntervalMs)
                     .build();
             manager.open(config, SerialFraming.idleGap(
                     DEFAULT_IDLE_GAP_MS,
