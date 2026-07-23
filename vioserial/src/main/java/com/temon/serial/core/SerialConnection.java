@@ -609,39 +609,29 @@ public final class SerialConnection {
             writeHandler.removeCallbacksAndMessages(null);
         }
         
-        // Close NIO resources
+        if (readThread != null) {
+            readThread.interrupt();
+            if (selector != null) {
+                selector.wakeup();
+            }
+        }
+
+        // Flush and close the shared native descriptor before waiting for I/O threads.
+        try {
+            if (serialPort != null) serialPort.close();
+        } catch (Throwable t) {
+            logger.logError(config.port, "Failed to close serial port", t);
+        }
+
         if (selector != null) {
             try {
                 selector.close();
             } catch (Throwable t) {
                 logger.logError(config.port, "Failed to close selector", t);
             }
-            selector = null;
         }
-        if (readChannel != null) {
-            try {
-                readChannel.close();
-            } catch (Throwable t) {
-                logger.logError(config.port, "Failed to close read channel", t);
-            }
-            readChannel = null;
-        }
-        selectableChannel = null;
-        
+
         if (readThread != null) {
-            readThread.interrupt();
-            // Close InputStream to unblock read() if it's blocking
-            try {
-                if (in != null) {
-                    in.close();
-                }
-            } catch (Throwable t) {
-                logger.logError(config.port, "Failed to close input stream during shutdown", t);
-            }
-            // Wake up selector if in NIO mode
-            if (selector != null) {
-                selector.wakeup();
-            }
             // Wait for thread to exit with timeout (5 seconds), unless we're on the read thread.
             if (Thread.currentThread() != readThread) {
                 try {
@@ -675,14 +665,12 @@ public final class SerialConnection {
         } catch (Throwable t) {
             logger.logError(config.port, "Failed to close output stream", t);
         }
-        try {
-            if (serialPort != null) serialPort.close();
-        } catch (Throwable t) {
-            logger.logError(config.port, "Failed to close serial port", t);
-        }
         serialPort = null;
         in = null;
         out = null;
+        selector = null;
+        readChannel = null;
+        selectableChannel = null;
         readThread = null;
 
         if (writeThread != null) {
@@ -941,5 +929,4 @@ public final class SerialConnection {
         }
     }
 }
-
 

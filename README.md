@@ -57,7 +57,7 @@ allprojects {
 在模块的build.gradle添加
 ```
 dependencies {
-    implementation 'com.github.Acccord:AndroidSerialPort:2.0.5'
+    implementation 'com.github.Acccord:AndroidSerialPort:2.0.6'
 }
 ```
 
@@ -297,6 +297,7 @@ if (decoder instanceof DelimiterFrameDecoder) {
 
 ## 更新记录
 
+- 2026-07-23：发布 2.0.6，修复部分 USB 串口关闭时长时间阻塞的问题，并简化重复关闭逻辑。
 - 2026-07-11：发布 2.0.5，`EasySerial.open` 新增可配置发送间隔重载；原两参数 API 与默认 300ms 行为保持不变。
 - 2026-02-07：native `libserial_port.so` 增加 16KB 页对齐链接参数，兼容 Android 15+ 16KB 设备要求。
 

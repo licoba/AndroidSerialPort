@@ -263,10 +263,22 @@ JNIEXPORT void JNICALL Java_com_temon_serial_internal_serialport_SerialPort_clos
 	jfieldID descriptorID = (*env)->GetFieldID(env, FileDescriptorClass, "descriptor", "I");
 
 	jobject mFd = (*env)->GetObjectField(env, thiz, mFdID);
+	if (mFd == NULL) {
+		return;
+	}
 	jint descriptor = (*env)->GetIntField(env, mFd, descriptorID);
+	if (descriptor < 0) {
+		return;
+	}
 
 	LOGD("close(fd = %d)", descriptor);
-	close(descriptor);
+	(*env)->SetIntField(env, mFd, descriptorID, (jint) -1);
+	if (tcflush(descriptor, TCIOFLUSH) == -1 && errno != ENOTTY) {
+		LOGD("tcflush(fd = %d) failed: %s", descriptor, strerror(errno));
+	}
+	if (close(descriptor) == -1) {
+		LOGD("close(fd = %d) failed: %s", descriptor, strerror(errno));
+	}
 }
 
 /*

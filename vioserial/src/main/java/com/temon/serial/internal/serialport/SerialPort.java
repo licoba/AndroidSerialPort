@@ -222,7 +222,7 @@ public class SerialPort {
 
     private native static FileDescriptor open(String path, int baudrate, int stopBits, int dataBits, int parity, int flowCon, int flags, int readTimeoutMs);
 
-    public native void close();
+    public synchronized native void close();
 
     /**
      * Check if the device is still online/connected.
